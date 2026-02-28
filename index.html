@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>바코드 실시간 공유 시스템 (최종 보정본)</title>
+    <title>바코드 시스템 (데이터 복구/업로드 기능)</title>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
     <style>
@@ -13,31 +13,39 @@
         .connected { background-color: #e3f2fd; color: #1976d2; border: 2px solid #2196f3; }
         .success { background-color: #dff9fb; color: #2ecc71; border: 2px solid #2ecc71; }
         .danger { background-color: #fab1a0; color: #e74c3c; border: 2px solid #e74c3c; }
-        .button-group { margin: 20px 0; display: flex; gap: 10px; justify-content: center; }
-        .btn { border: none; padding: 12px 24px; border-radius: 5px; cursor: pointer; font-weight: bold; color: white; transition: 0.2s; }
+        
+        .button-group { margin: 20px 0; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+        .btn { border: none; padding: 10px 18px; border-radius: 5px; cursor: pointer; font-weight: bold; color: white; transition: 0.2s; font-size: 14px; }
         .btn-connect { background: #3498db; }
         .btn-excel { background: #27ae60; }
+        .btn-upload { background: #e67e22; } /* 업로드 버튼 색상 */
+        
         #barcodeList { text-align: left; margin-top: 20px; list-style: none; padding: 0; border-top: 2px solid #eee; }
-        #barcodeList li { background: #fff; border-bottom: 1px solid #eee; padding: 15px; display: flex; justify-content: space-between; align-items: center; border-left: 5px solid #4A90E2; margin-bottom: 8px; border-radius: 0 8px 8px 0; }
-        .barcode-text { font-family: 'Courier New', monospace; font-size: 15px; word-break: break-all; margin-right: 10px; flex: 1; }
-        .del-btn { background: #ff7675; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; flex-shrink: 0; }
+        #barcodeList li { background: #fff; border-bottom: 1px solid #eee; padding: 15px; display: flex; justify-content: space-between; align-items: center; border-left: 5px solid #27ae60; margin-bottom: 8px; border-radius: 0 8px 8px 0; }
+        .barcode-text { font-family: 'Courier New', monospace; font-size: 15px; }
+        .del-btn { background: #ff7675; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; }
+        
+        /* 파일 입력창 숨김 */
+        #fileInput { display: none; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h2>🌐 무선 바코드 공유 시스템 (보정 모드)</h2>
-        <div id="status" class="waiting">스캐너를 연결해주세요</div>
-
+        <h2>🌐 바코드 공유 (데이터 복구 모드)</h2>
+        <div id="status" class="waiting">스캐너를 연결하거나 파일을 업로드하세요</div>
+        
         <div class="button-group">
-            <button id="connectBtn" class="btn btn-connect">🔌 스캐너 장치 연결</button>
+            <button id="connectBtn" class="btn btn-connect">🔌 스캐너 연결</button>
             <button class="btn btn-excel" onclick="exportToExcel()">📊 엑셀 다운로드</button>
+            <button class="btn btn-upload" onclick="document.getElementById('fileInput').click()">📂 CSV 데이터 업로드</button>
+            <input type="file" id="fileInput" accept=".csv" onchange="importFromCSV(event)">
         </div>
 
         <ul id="barcodeList"></ul>
     </div>
 
     <script>
-        // --- 1. Firebase 설정 ---
+        // --- 1. Firebase 설정 (기존과 동일) ---
         const firebaseConfig = {
             apiKey: "AIzaSyCrc5TGuXChUFvTLq0Aw-4CgDvXUfWkBgE",
             authDomain: "barcode-scaner-1d43e.firebaseapp.com",
@@ -54,31 +62,22 @@
         const status = document.getElementById('status');
         const connectBtn = document.getElementById('connectBtn');
         const list = document.getElementById('barcodeList');
-        
         let rawData = {};
-        let scannedData = [];
 
+        // 리스트 실시간 동기화
         barcodeRef.on('value', (snapshot) => {
             rawData = snapshot.val() || {};
-            scannedData = Object.values(rawData);
             renderList();
         });
 
-        // --- 2. 시리얼 연결 로직 ---
+        // --- 2. 시리얼 연결 로직 (기존 유지) ---
         connectBtn.addEventListener('click', async () => {
-            if (!("serial" in navigator)) {
-                alert("이 브라우저는 시리얼 통신을 지원하지 않습니다. Chrome을 사용하세요.");
-                return;
-            }
             try {
                 const port = await navigator.serial.requestPort();
-                // 데이터 유실이 잦다면 baudRate를 115200으로 변경해 보세요
                 await port.open({ baudRate: 9600 }); 
-
-                status.innerText = "✅ 연결 성공! 스캔을 시작하세요.";
+                status.innerText = "✅ 연결됨! 스캔을 시작하세요.";
                 status.className = "connected";
                 connectBtn.style.visibility = "hidden";
-
                 readSerialWithBuffer(port);
             } catch (error) {
                 status.innerText = "❌ 연결 오류: " + error.message;
@@ -86,71 +85,74 @@
             }
         });
 
-        // --- 3. [핵심] 조각난 데이터 합치기 로직 ---
         async function readSerialWithBuffer(port) {
             const decoder = new TextDecoderStream();
             port.readable.pipeTo(decoder.writable);
             const reader = decoder.readable.getReader();
-            
             let buffer = "";
             let timeoutId = null;
 
-            try {
-                while (true) {
-                    const { value, done } = await reader.read();
-                    if (done) break;
-                    
-                    if (value) {
-                        buffer += value; // 조각난 데이터를 버퍼에 계속 추가
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                if (value) {
+                    buffer += value;
+                    if (timeoutId) clearTimeout(timeoutId);
+                    timeoutId = setTimeout(() => {
+                        const finalCode = buffer.replace(/[\r\n]/g, "").trim();
+                        if (finalCode.length > 1) processBarcode(finalCode);
+                        buffer = "";
+                        timeoutId = null;
+                    }, 50); 
+                }
+            }
+        }
 
-                        // 이미 대기 중인 타이머가 있다면 취소 (새 데이터가 계속 들어오는 중)
-                        if (timeoutId) clearTimeout(timeoutId);
+        // --- 3. 데이터 저장 (덮어쓰기 로직) ---
+        function processBarcode(code, customTime = null) {
+            const now = customTime || new Date().toLocaleString('ko-KR');
+            const safeKey = code.replace(/[.$#[\]/]/g, "_");
 
-                        // 마지막 조각이 들어온 후 50ms 동안 잠잠하면 데이터 수신 완료로 간주
-                        timeoutId = setTimeout(() => {
-                            const finalCode = buffer.replace(/[\r\n]/g, "").trim();
-                            if (finalCode.length > 2) { // 너무 짧은 쓰레기 값 방지
-                                processBarcode(finalCode);
-                            }
-                            buffer = ""; // 다음 스캔을 위해 버퍼 초기화
-                            timeoutId = null;
-                        }, 50); 
+            return db.ref('barcodes/' + safeKey).set({
+                code: code,
+                time: now
+            });
+        }
+
+        // --- 4. [신규] CSV 파일에서 데이터 읽어와 Firebase로 업로드 ---
+        function importFromCSV(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const content = e.target.result;
+                const rows = content.split("\n");
+                let count = 0;
+
+                // 첫 줄(헤더) 제외하고 한 줄씩 처리
+                rows.forEach((row, index) => {
+                    if (index === 0 || row.trim() === "") return;
+
+                    // 따옴표 제거 및 콤마로 분리
+                    const columns = row.split(",").map(col => col.replace(/"/g, "").trim());
+                    const code = columns[0];
+                    const time = columns[1];
+
+                    if (code) {
+                        processBarcode(code, time);
+                        count++;
                     }
-                }
-            } catch (error) {
-                console.error("수신 중단:", error);
-                status.innerText = "❌ 연결 끊김";
-                status.className = "danger";
-                connectBtn.style.visibility = "visible";
-            }
-        }
-
-        // --- 4. 데이터 저장 및 처리 ---
-        function processBarcode(code) {
-            const isDuplicate = scannedData.some(item => item.code === code);
-
-            if (isDuplicate) {
-                playWarningSound();
-                status.innerText = "⚠️ 중복 데이터: " + code;
-                status.className = "danger";
-            } else {
-                const now = new Date();
-                barcodeRef.push({
-                    code: code,
-                    time: now.toLocaleString('ko-KR')
                 });
-                status.innerText = "✅ 등록 완료: " + code;
+
+                status.innerText = `✅ ${count}개의 데이터 업로드 완료!`;
                 status.className = "success";
-            }
-            
-            setTimeout(() => {
-                if (status.className !== "waiting") {
-                    status.innerText = "✅ 스캐너 연결됨 (수신 대기 중)";
-                    status.className = "connected";
-                }
-            }, 2000);
+                event.target.value = ""; // 파일 입력 초기화
+            };
+            reader.readAsText(file, "UTF-8");
         }
 
+        // --- 5. UI 렌더링 및 삭제/엑셀 함수 ---
         function renderList() {
             list.innerHTML = "";
             const keys = Object.keys(rawData).reverse();
@@ -160,43 +162,28 @@
                 li.innerHTML = `
                     <div class="barcode-text">
                         <strong>${item.code}</strong><br>
-                        <span style="color:#888; font-size:11px;">${item.time}</span>
+                        <span style="color:#888; font-size:11px;">최근 기록: ${item.time}</span>
                     </div>
-                    <button class="del-btn" onclick="deleteBarcode('${key}', '${item.code}')">삭제</button>
+                    <button class="del-btn" onclick="deleteBarcode('${key}')">삭제</button>
                 `;
                 list.appendChild(li);
             });
         }
 
-        function deleteBarcode(key, code) {
-            if (confirm(`'${code}' 데이터를 삭제하시겠습니까?`)) {
-                barcodeRef.child(key).remove();
-            }
-        }
-
-        function playWarningSound() {
-            try {
-                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                const oscillator = audioCtx.createOscillator();
-                oscillator.type = 'sawtooth';
-                oscillator.frequency.setValueAtTime(200, audioCtx.currentTime);
-                oscillator.connect(audioCtx.destination);
-                oscillator.start();
-                oscillator.stop(audioCtx.currentTime + 0.2);
-            } catch (e) { }
+        function deleteBarcode(key) {
+            if (confirm("정말 삭제하시겠습니까?")) db.ref('barcodes/' + key).remove();
         }
 
         function exportToExcel() {
-            if (scannedData.length === 0) return alert("데이터가 없습니다.");
+            const data = Object.values(rawData);
+            if (data.length === 0) return alert("데이터 없음");
             let csvContent = "\uFEFF바코드 번호,스캔 시간\n";
-            scannedData.forEach(item => {
-                csvContent += `"${item.code}","${item.time}"\n`;
-            });
+            data.forEach(item => { csvContent += `"${item.code}","${item.time}"\n`; });
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement("a");
             a.href = url;
-            a.download = `Barcode_Data_${new Date().toISOString().slice(0,10)}.csv`;
+            a.download = `Barcode_Backup.csv`;
             a.click();
         }
     </script>
