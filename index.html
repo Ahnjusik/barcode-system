@@ -1,23 +1,36 @@
 <!DOCTYPE html>
-<html>
+<html lang="ko">
 <head>
+    <meta charset="UTF-8">
     <title>바코드 실시간 공유 시스템</title>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; text-align: center; padding: 20px; background-color: #f4f7f6; }
+        body { font-family: 'Segoe UI', 'Apple SD Gothic Neo', sans-serif; text-align: center; padding: 20px; background-color: #f4f7f6; }
         .container { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); display: inline-block; width: 95%; max-width: 600px; }
-        #inputBox { padding: 12px; font-size: 18px; width: 80%; border: 2px solid #ddd; border-radius: 8px; outline: none; text-transform: uppercase; }
-        #status { margin-top: 20px; font-weight: bold; font-size: 18px; min-height: 27px; }
-        .success { color: #2ecc71; }
-        .danger { color: #e74c3c; animation: shake 0.2s ease-in-out 2; }
+        #inputBox { padding: 12px; font-size: 18px; width: 80%; border: 2px solid #ddd; border-radius: 8px; outline: none; text-transform: uppercase; margin-bottom: 10px; }
+        #inputBox:focus { border-color: #3498db; }
+        #status { margin-top: 15px; font-weight: bold; font-size: 16px; min-height: 24px; padding: 5px; border-radius: 5px; }
+        .success { color: #2ecc71; background-color: #eafaf1; }
+        .danger { color: #e74c3c; background-color: #fdedec; animation: shake 0.2s ease-in-out 2; }
         .button-group { margin: 15px 0; display: flex; justify-content: center; gap: 10px; }
-        .btn { border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-weight: bold; color: white; }
+        .btn { border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-weight: bold; color: white; transition: 0.2s; }
         .export-btn { background: #27ae60; }
+        .export-btn:hover { background: #219150; }
         #barcodeList { text-align: left; margin-top: 20px; list-style: none; padding: 0; border-top: 2px solid #eee; }
-        #barcodeList li { background: #fff; border-bottom: 1px solid #eee; padding: 12px; display: flex; justify-content: space-between; align-items: center; }
-        .del-btn { background: #ff7675; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; }
+        #barcodeList li { 
+            background: #fff; 
+            border-bottom: 1px solid #eee; 
+            padding: 12px; 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+            animation: fadeIn 0.3s ease;
+        }
+        .del-btn { background: #ff7675; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+        .del-btn:hover { background: #d63031; }
         @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
 <body>
@@ -25,42 +38,43 @@
         <h2>🌐 바코드 실시간 공유 검사기</h2>
         <input type="text" id="inputBox" placeholder="바코드를 스캔하세요" autofocus>
         <div id="status">연결 중...</div>
+        
         <div class="button-group">
             <button class="btn export-btn" onclick="exportToExcel()">📊 Excel로 내보내기</button>
         </div>
+        
         <ul id="barcodeList"></ul>
     </div>
 
     <script>
-        // --- [중요] 여기에 본인의 Firebase 설정 정보를 입력하세요 ---
+        // --- [중요] Firebase 설정 (사용자님의 정보를 그대로 유지) ---
         const firebaseConfig = {
             apiKey: "AIzaSyCrc5TGuXChUFvTLq0Aw-4CgDvXUfWkBgE",
-  	authDomain: "barcode-scaner-1d43e.firebaseapp.com",
-  	databaseURL: "https://barcode-scaner-1d43e-default-rtdb.firebaseio.com",
- 	projectId: "barcode-scaner-1d43e",
-  	storageBucket: "barcode-scaner-1d43e.firebasestorage.app",
-  	messagingSenderId: "357566040009",
-  	appId: "1:357566040009:web:19c0335d2d144e1fd08a18"
-};
-        // -------------------------------------------------------
+            authDomain: "barcode-scaner-1d43e.firebaseapp.com",
+            databaseURL: "https://barcode-scaner-1d43e-default-rtdb.firebaseio.com",
+            projectId: "barcode-scaner-1d43e",
+            storageBucket: "barcode-scaner-1d43e.firebasestorage.app",
+            messagingSenderId: "357566040009",
+            appId: "1:357566040009:web:19c0335d2d144e1fd08a18"
+        };
 
         firebase.initializeApp(firebaseConfig);
         const db = firebase.database();
         const barcodeRef = db.ref('barcodes');
 
-        let scannedData = [];
+        let rawData = {}; // Firebase 원본 데이터를 담을 객체
         const inputBox = document.getElementById('inputBox');
         const status = document.getElementById('status');
         const list = document.getElementById('barcodeList');
 
-        // DB 실시간 감시 (기기 간 공유 핵심)
+        // DB 실시간 감시: 데이터가 변경되면 자동으로 리스트를 다시 그립니다.
         barcodeRef.on('value', (snapshot) => {
-            const data = snapshot.val();
-            scannedData = data ? Object.values(data) : [];
+            rawData = snapshot.val() || {};
             status.innerText = "서버 연결됨 (실시간 공유 중)";
             renderList();
         });
 
+        // 중복 경고음 발생기
         function playWarningSound() {
             const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             const oscillator = audioCtx.createOscillator();
@@ -74,12 +88,15 @@
             oscillator.stop(audioCtx.currentTime + 0.2);
         }
 
+        // 입력창 엔터 이벤트
         inputBox.addEventListener('keypress', function(e) {
             if (e.key === 'Enter') {
                 const code = this.value.trim().toUpperCase();
                 if (code === "") return;
 
-                const isDuplicate = scannedData.some(item => item.code === code);
+                // 중복 체크 (rawData 객체의 값들 중 code가 일치하는지 확인)
+                const items = Object.values(rawData);
+                const isDuplicate = items.some(item => item.code === code);
 
                 if (isDuplicate) {
                     playWarningSound();
@@ -89,7 +106,7 @@
                     const now = new Date();
                     const timestamp = now.toLocaleString();
                     
-                    // Firebase DB에 저장
+                    // Firebase DB에 추가 (자동으로 고유 Key 생성됨)
                     barcodeRef.push({ code, time: timestamp });
 
                     status.innerText = "✅ 등록 완료: " + code;
@@ -99,19 +116,50 @@
             }
         });
 
+        // 리스트 그리기 함수 (삭제 버튼 포함)
         function renderList() {
             list.innerHTML = "";
-            [...scannedData].reverse().forEach(item => {
+            
+            // 최신순 정렬을 위해 Key들을 가져와 역순으로 정렬
+            const keys = Object.keys(rawData).reverse();
+            
+            keys.forEach(key => {
+                const item = rawData[key];
                 const li = document.createElement('li');
-                li.innerHTML = `<div><strong>${item.code}</strong> <span style="color:#888; font-size:12px; margin-left:10px;">[${item.time}]</span></div>`;
+                li.innerHTML = `
+                    <div>
+                        <strong>${item.code}</strong> 
+                        <span style="color:#888; font-size:12px; margin-left:10px;">[${item.time}]</span>
+                    </div>
+                    <button class="del-btn" onclick="deleteItem('${key}')">삭제</button>
+                `;
                 list.appendChild(li);
             });
         }
 
+        // 개별 데이터 삭제 함수
+        function deleteItem(key) {
+            if (confirm("정말로 이 데이터를 삭제하시겠습니까?")) {
+                // Firebase에서 해당 Key를 찾아 삭제
+                db.ref('barcodes/' + key).remove()
+                    .then(() => {
+                        status.innerText = "🗑️ 데이터가 삭제되었습니다.";
+                        status.className = "";
+                    })
+                    .catch((err) => {
+                        alert("삭제 오류: " + err.message);
+                    });
+            }
+        }
+
+        // CSV 내보내기 (Excel 호환)
         function exportToExcel() {
-            if (scannedData.length === 0) return alert("데이터가 없습니다.");
+            const items = Object.values(rawData);
+            if (items.length === 0) return alert("데이터가 없습니다.");
+            
             let csvContent = "\uFEFF바코드 번호,스캔 시간\n";
-            scannedData.forEach(item => csvContent += `${item.code},${item.time}\n`);
+            items.forEach(item => csvContent += `${item.code},${item.time}\n`);
+            
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement("a");
