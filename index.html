@@ -2,36 +2,30 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>바코드 시리얼 실시간 공유 시스템</title>
+    <title>바코드 실시간 공유 시스템 (최종 보정본)</title>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
     <style>
         body { font-family: 'Segoe UI', sans-serif; text-align: center; padding: 20px; background-color: #f4f7f6; }
         .container { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); display: inline-block; width: 95%; max-width: 600px; }
-        
         #status { margin-top: 20px; font-weight: bold; font-size: 18px; min-height: 30px; padding: 15px; border-radius: 8px; transition: 0.3s; }
         .waiting { background-color: #ecf0f1; color: #7f8c8d; }
         .connected { background-color: #e3f2fd; color: #1976d2; border: 2px solid #2196f3; }
         .success { background-color: #dff9fb; color: #2ecc71; border: 2px solid #2ecc71; }
         .danger { background-color: #fab1a0; color: #e74c3c; border: 2px solid #e74c3c; }
-        
         .button-group { margin: 20px 0; display: flex; gap: 10px; justify-content: center; }
         .btn { border: none; padding: 12px 24px; border-radius: 5px; cursor: pointer; font-weight: bold; color: white; transition: 0.2s; }
         .btn-connect { background: #3498db; }
-        .btn-connect:hover { background: #2980b9; }
         .btn-excel { background: #27ae60; }
-        
         #barcodeList { text-align: left; margin-top: 20px; list-style: none; padding: 0; border-top: 2px solid #eee; }
         #barcodeList li { background: #fff; border-bottom: 1px solid #eee; padding: 15px; display: flex; justify-content: space-between; align-items: center; border-left: 5px solid #4A90E2; margin-bottom: 8px; border-radius: 0 8px 8px 0; }
-        .barcode-text { font-family: 'Courier New', monospace; font-size: 16px; }
-        .del-btn { background: #ff7675; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; }
+        .barcode-text { font-family: 'Courier New', monospace; font-size: 15px; word-break: break-all; margin-right: 10px; flex: 1; }
+        .del-btn { background: #ff7675; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; flex-shrink: 0; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h2>🌐 무선 바코드 공유 시스템 (Serial)</h2>
-        <p style="font-size: 13px; color: #666;">입력기(한/영) 간섭 없는 시리얼 통신 모드</p>
-        
+        <h2>🌐 무선 바코드 공유 시스템 (보정 모드)</h2>
         <div id="status" class="waiting">스캐너를 연결해주세요</div>
 
         <div class="button-group">
@@ -43,7 +37,7 @@
     </div>
 
     <script>
-        // 1. Firebase 설정 (본인의 값으로 교체하세요)
+        // --- 1. Firebase 설정 ---
         const firebaseConfig = {
             apiKey: "AIzaSyCrc5TGuXChUFvTLq0Aw-4CgDvXUfWkBgE",
             authDomain: "barcode-scaner-1d43e.firebaseapp.com",
@@ -53,7 +47,6 @@
             messagingSenderId: "357566040009",
             appId: "1:357566040009:web:19c0335d2d144e1fd08a18"
         };
-
         firebase.initializeApp(firebaseConfig);
         const db = firebase.database();
         const barcodeRef = db.ref('barcodes');
@@ -65,46 +58,42 @@
         let rawData = {};
         let scannedData = [];
 
-        // 2. 실시간 데이터 수신 및 리스트 업데이트
         barcodeRef.on('value', (snapshot) => {
             rawData = snapshot.val() || {};
             scannedData = Object.values(rawData);
             renderList();
         });
 
-        // 3. 시리얼 통신 연결 로직
+        // --- 2. 시리얼 연결 로직 ---
         connectBtn.addEventListener('click', async () => {
             if (!("serial" in navigator)) {
-                alert("이 브라우저는 시리얼 통신을 지원하지 않습니다. 크롬 또는 엣지를 사용하세요.");
+                alert("이 브라우저는 시리얼 통신을 지원하지 않습니다. Chrome을 사용하세요.");
                 return;
             }
-
             try {
-                // 장치 선택 팝업 요청
                 const port = await navigator.serial.requestPort();
-                // 포트 열기 (BaudRate는 스캐너 설정에 따라 9600 또는 115200)
-                await port.open({ baudRate: 9600 });
+                // 데이터 유실이 잦다면 baudRate를 115200으로 변경해 보세요
+                await port.open({ baudRate: 9600 }); 
 
-                status.innerText = "✅ 스캐너 연결됨 (스캔하세요)";
+                status.innerText = "✅ 연결 성공! 스캔을 시작하세요.";
                 status.className = "connected";
-                connectBtn.style.display = "none"; // 연결 후 버튼 숨김
+                connectBtn.style.visibility = "hidden";
 
-                // 데이터 스트림 읽기 시작
-                readSerialData(port);
-
+                readSerialWithBuffer(port);
             } catch (error) {
-                console.error(error);
-                status.innerText = "❌ 연결 실패: " + error.message;
+                status.innerText = "❌ 연결 오류: " + error.message;
                 status.className = "danger";
             }
         });
 
-        // 4. 시리얼 데이터 읽기 함수
-        async function readSerialData(port) {
+        // --- 3. [핵심] 조각난 데이터 합치기 로직 ---
+        async function readSerialWithBuffer(port) {
             const decoder = new TextDecoderStream();
-            const inputClosed = port.readable.pipeTo(decoder.writable);
+            port.readable.pipeTo(decoder.writable);
             const reader = decoder.readable.getReader();
+            
             let buffer = "";
+            let timeoutId = null;
 
             try {
                 while (true) {
@@ -112,32 +101,37 @@
                     if (done) break;
                     
                     if (value) {
-                        buffer += value;
-                        // 엔터(\r 또는 \n)가 감지되면 한 줄 읽기 완료
-                        if (buffer.includes('\r') || buffer.includes('\n')) {
-                            const barcode = buffer.trim();
-                            if (barcode) {
-                                processBarcode(barcode);
+                        buffer += value; // 조각난 데이터를 버퍼에 계속 추가
+
+                        // 이미 대기 중인 타이머가 있다면 취소 (새 데이터가 계속 들어오는 중)
+                        if (timeoutId) clearTimeout(timeoutId);
+
+                        // 마지막 조각이 들어온 후 50ms 동안 잠잠하면 데이터 수신 완료로 간주
+                        timeoutId = setTimeout(() => {
+                            const finalCode = buffer.replace(/[\r\n]/g, "").trim();
+                            if (finalCode.length > 2) { // 너무 짧은 쓰레기 값 방지
+                                processBarcode(finalCode);
                             }
-                            buffer = ""; // 버퍼 초기화
-                        }
+                            buffer = ""; // 다음 스캔을 위해 버퍼 초기화
+                            timeoutId = null;
+                        }, 50); 
                     }
                 }
             } catch (error) {
-                status.innerText = "❌ 데이터 읽기 오류";
+                console.error("수신 중단:", error);
+                status.innerText = "❌ 연결 끊김";
                 status.className = "danger";
-            } finally {
-                reader.releaseLock();
+                connectBtn.style.visibility = "visible";
             }
         }
 
-        // 5. 바코드 처리 (중복 체크 및 저장)
+        // --- 4. 데이터 저장 및 처리 ---
         function processBarcode(code) {
             const isDuplicate = scannedData.some(item => item.code === code);
 
             if (isDuplicate) {
                 playWarningSound();
-                status.innerText = "⚠️ 중복 발생: " + code;
+                status.innerText = "⚠️ 중복 데이터: " + code;
                 status.className = "danger";
             } else {
                 const now = new Date();
@@ -147,17 +141,15 @@
                 });
                 status.innerText = "✅ 등록 완료: " + code;
                 status.className = "success";
-                
-                setTimeout(() => {
-                    if (status.className === "success") {
-                        status.innerText = "✅ 스캐너 연결됨 (스캔하세요)";
-                        status.className = "connected";
-                    }
-                }, 1500);
             }
+            
+            setTimeout(() => {
+                if (status.className !== "waiting") {
+                    status.innerText = "✅ 스캐너 연결됨 (수신 대기 중)";
+                    status.className = "connected";
+                }
+            }, 2000);
         }
-
-        // --- 보조 함수들 (기존과 동일) ---
 
         function renderList() {
             list.innerHTML = "";
@@ -187,7 +179,7 @@
                 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
                 const oscillator = audioCtx.createOscillator();
                 oscillator.type = 'sawtooth';
-                oscillator.frequency.setValueAtTime(150, audioCtx.currentTime);
+                oscillator.frequency.setValueAtTime(200, audioCtx.currentTime);
                 oscillator.connect(audioCtx.destination);
                 oscillator.start();
                 oscillator.stop(audioCtx.currentTime + 0.2);
